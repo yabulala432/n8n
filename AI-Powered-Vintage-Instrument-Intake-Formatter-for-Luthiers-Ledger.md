@@ -966,8 +966,6 @@ These official docs were used to align this guide with the current n8n browser U
 
 ### Postwork Project
 ```
-Current Project
-You have an accepted project. You can start recording when ready.
 AI-Powered Vintage Instrument Intake Formatter for Luthier’s Ledger
 Overview Luthier’s Ledger is a boutique music shop specializing in rare, vintage string instruments. The Project Manager currently receives disorganized intake notes from field buyers via email and needs an n8n workflow that uses AI to instantly clean, categorize, and grade these notes into a structured format for their inventory database.
 

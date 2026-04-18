@@ -1296,3 +1296,24 @@ These official n8n docs were used to align this guide with the current browser U
 - Error Trigger: https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.errortrigger/
 - Merge: https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.merge/
 - Workflow export/import: https://docs.n8n.io/workflows/export-import/
+
+### Postwork Project
+```
+Clinical Pulse: Urgent On-Call Routing for Willow Stream Mental Health
+Willow Stream Mental Health Hub is a multi-disciplinary practice that needs a better way to coordinate urgent peer-consultations without interrupting active therapy sessions. The Project Manager requires an n8n-based "Clinical Pulse" system that routes internal crisis alerts based on real-time clinician availability.
+
+Requirements
+Trigger Mechanism: Create a workflow that triggers when a therapist submits an "Urgent Consult" request via a webhook (simulated by a public form like Tally or a dummy Typeform).
+Availability Logic: The workflow must cross-reference a Google Calendar (representing the team's session schedule) to determine which clinicians are currently "In Session" vs. "Available."
+Intelligent Branching:
+If clinicians are available, the workflow must post an alert to a specific team chat channel (Slack or Telegram) mentioning only the available staff.
+If all staff are currently in sessions, the workflow must escalate the alert to the Clinical Director via a high-priority notification.
+Audit Logging: Every alert must be logged into a Google Sheet, capturing the request time, the clinicians notified, and the status of the escalation.
+Resilience: Include error-handling nodes to manage potential API timeouts or empty calendar returns.
+Deliverables
+Workflow JSON: The exported n8n workflow file including all triggers, filters, and logic nodes.
+Operational Screenshots: Clear images of the workflow canvas and the successful execution of the branching logic (one "Available" path and one "Escalated" path).
+Test Run Video: A brief screen recording showing a form submission resulting in a correctly routed message in the chat tool and a new row in the Google Sheet log.
+Success Looks Like
+The "Clinical Pulse" system successfully filters out busy clinicians to protect the sanctity of the therapy hour while ensuring no crisis request goes unanswered. Your work will be judged on logical branching accuracy, clear naming conventions within the n8n canvas, and the robustness of the error-handling path.
+```

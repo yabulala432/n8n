@@ -1165,3 +1165,25 @@ These official n8n docs were used to align this guide to the current browser UI 
 - Error Trigger: https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.errortrigger/
 - Merge: https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.merge/
 - Workflow export and import: https://docs.n8n.io/workflows/export-import/
+
+### Postwork Projec
+```
+Field Alert Automation for Oak & Iron Custom Cabinetry
+Oak & Iron is a bespoke kitchen and bath cabinetry shop that struggles with communication gaps between installers at job sites and the production team at the shop. When installers encounter "Project Blockers"—such as unexpected plumbing behind a wall or incorrect site measurements—the current manual SMS system leads to delays and forgotten tasks.
+
+Requirements
+The company needs a centralized n8n workflow to handle field issue reporting:
+
+Intake: The workflow must trigger via a Webhook or Google Form submission used by installers to report site issues (fields should include Project Name, Issue Type, Severity, and Notes).
+Urgency Logic: The automation must use a Switch or If node to branch based on "Severity."
+Critical Issues: Must trigger an immediate notification to a communication platform (Slack, Discord, or Telegram) to alert the shop foreman.
+Standard Issues: Should only be logged for the weekly production meeting.
+Data Persistence: Every submission, regardless of severity, must be logged as a new row in a "Master Field Log" via Google Sheets or Airtable.
+Error Resilience: Include an Error Trigger node or a basic "Catch" branch to ensure that if the database logging fails, an admin receives an email notification.
+Deliverables
+Workflow Export: The n8n JSON file containing the complete workflow.
+Visual Documentation: A screenshot of the full n8n node graph and a screenshot of a successful test execution showing the green "success" indicators on all nodes.
+Proof of Output: A screenshot of the resulting Google Sheet/Airtable row and the corresponding Slack/Discord/Email notification generated during the test.
+Success looks like
+A reliable system where no field issue is "lost in the shuffle" and urgent blockers are flagged to the shop within seconds. Your work will be evaluated on the logical flow of the branching nodes, the naming conventions used for nodes, and the successful handling of data from the trigger to the final communication outputs.
+```

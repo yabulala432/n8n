@@ -121,7 +121,7 @@ Recommended buildable canvas for n8n:
 `-> Alert - Slack Conflict`  
 `-> Update - Needs Attention Event`
 
-`False` branch from Resource Keywords Found?`:`  
+`False` branch from `Route - Resource Keywords Found?`:  
 `-> Optional - Review Missing Resources`
 
 ### Error workflow

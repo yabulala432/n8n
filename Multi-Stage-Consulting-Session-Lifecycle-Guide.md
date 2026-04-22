@@ -179,13 +179,13 @@ If you want the fastest clean build, do it in this order:
 
 ## 6. Main Workflow Step by Step
 
-## 6.1 Create the Workflow
+### 6.1 Create the Workflow
 
 1. In n8n, click `Create Workflow`.
 2. Rename it to `PSG - Consulting Session Lifecycle`.
 3. Click `Save`.
 
-## 6.2 Node 1: `Trigger - Strategy Session Started`
+### 6.2 Node 1: `Trigger - Strategy Session Started`
 
 Use a `Google Calendar Trigger` node.
 
@@ -205,7 +205,7 @@ This is the safest default because the workflow starts when the meeting is actua
 
 Use timed events, not all-day events. This workflow expects a start and end time.
 
-## 6.3 Node 2: `Normalize - Event Data`
+### 6.3 Node 2: `Normalize - Event Data`
 
 Add an `Edit Fields (Set)` node after the trigger.
 
@@ -242,7 +242,7 @@ Later nodes can now use simple field names like:
 - `event_url`
 - `feedback_form_url`
 
-## 6.4 Node 3: `Route - Strategy Event?`
+### 6.4 Node 3: `Route - Strategy Event?`
 
 Add an `IF` node after `Normalize - Event Data`.
 
@@ -264,7 +264,7 @@ Only continue if the title starts with `[STRAT]`.
 - `true` branch = continue
 - `false` branch = stop
 
-## 6.5 Node 4: `Extract - Client Name`
+### 6.5 Node 4: `Extract - Client Name`
 
 Add a `Code` node on the `true` branch.
 
@@ -322,7 +322,7 @@ return {
 | `[STRAT] Acme Corp` | `Acme Corp` |
 | `[STRAT] Acme Corp | Q2 Planning` | `Acme Corp` |
 
-## 6.6 Node 5: `Lookup - Retainer Record`
+### 6.6 Node 5: `Lookup - Retainer Record`
 
 Add an `Airtable` node after `Extract - Client Name`.
 
@@ -350,7 +350,7 @@ Switch `Filter By Formula` to expression mode and paste:
 {{ "{Normalized Client Key}='" + $json.client_key_normalized + "'" }}
 ```
 
-## 6.7 Node 6: `Combine - Retainer Context`
+### 6.7 Node 6: `Combine - Retainer Context`
 
 Add a `Code` node after the Airtable lookup.
 
@@ -394,7 +394,7 @@ return {
 - `client_email`
 - `slack_contact`
 
-## 6.8 Node 7: `Route - Client Match Found?`
+### 6.8 Node 7: `Route - Client Match Found?`
 
 Add an `IF` node after `Combine - Retainer Context`.
 
@@ -411,7 +411,7 @@ Add an `IF` node after `Combine - Retainer Context`.
 - `true` = matched client
 - `false` = no Airtable match
 
-## 6.9 Node 8: `Alert - Slack Unresolved Client`
+### 6.9 Node 8: `Alert - Slack Unresolved Client`
 
 On the `false` branch from `Route - Client Match Found?`, add a `Slack` node.
 
@@ -436,7 +436,7 @@ Event URL: ${$json.event_url || 'No event URL returned'}
 No Airtable retainer record was found. Manual review is required.` }}
 ```
 
-## 6.10 Node 9: `Validate - Contract Active?`
+### 6.10 Node 9: `Validate - Contract Active?`
 
 On the `true` branch from `Route - Client Match Found?`, add an `IF` node.
 
@@ -454,7 +454,7 @@ On the `true` branch from `Route - Client Match Found?`, add an `IF` node.
 - `true` = contract is active
 - `false` = contract is paused, closed, or otherwise invalid
 
-## 6.11 Node 10: `Alert - Slack Inactive Contract`
+### 6.11 Node 10: `Alert - Slack Inactive Contract`
 
 On the `false` branch from `Validate - Contract Active?`, add a `Slack` node.
 
@@ -471,7 +471,7 @@ Remaining hours: ${$json.remaining_hours ?? 'Unknown'}
 Do not rely on automatic follow-up until this account is reviewed.` }}
 ```
 
-## 6.12 Node 11: `Route - Low Balance?`
+### 6.12 Node 11: `Route - Low Balance?`
 
 On the `true` branch from `Validate - Contract Active?`, add an `IF` node.
 
@@ -489,7 +489,7 @@ On the `true` branch from `Validate - Contract Active?`, add an `IF` node.
 - `true` = low balance path
 - `false` = healthy balance path
 
-## 6.13 Node 12: `Alert - Slack Healthy Balance`
+### 6.13 Node 12: `Alert - Slack Healthy Balance`
 
 On the `false` branch from `Route - Low Balance?`, add a `Slack` node.
 
@@ -502,7 +502,7 @@ Remaining hours: ${$json.remaining_hours}
 Status: Healthy balance` }}
 ```
 
-## 6.14 Node 13: `Alert - Slack Low Balance`
+### 6.14 Node 13: `Alert - Slack Low Balance`
 
 On the `true` branch from `Route - Low Balance?`, add a `Slack` node.
 
@@ -516,9 +516,9 @@ Remaining hours: ${$json.remaining_hours}
 This account is below the 2-hour threshold and should be reviewed.` }}
 ```
 
-## 6.15 Node 14: `Create - Session Note`
+### 6.15 Node 14: `Create - Session Note`
 
-Connect these three nodes into the same Airtable create node:
+Connect these four nodes into the same Airtable create node:
 
 - `Alert - Slack Unresolved Client`
 - `Alert - Slack Inactive Contract`
@@ -557,7 +557,7 @@ Contract status: ${$('Combine - Retainer Context').first().json.contract_status 
 Follow-up target time: ${$('Combine - Retainer Context').first().json.follow_up_at || 'Not calculated'}` }}
 ```
 
-## 6.16 Node 15: `Route - Send Follow-Up?`
+### 6.16 Node 15: `Route - Send Follow-Up?`
 
 Add an `IF` node after `Create - Session Note`.
 
@@ -580,7 +580,7 @@ Only allow the email branch when:
 - `true` = continue to wait and Gmail
 - `false` = end
 
-## 6.17 Node 16: `Wait - Two Hours After Session End`
+### 6.17 Node 16: `Wait - Two Hours After Session End`
 
 Add a `Wait` node on the `true` branch.
 
@@ -595,7 +595,7 @@ Add a `Wait` node on the `true` branch.
 
 If the meeting ends at `2026-04-22T16:00:00-04:00`, the wait should resume at `2026-04-22T18:00:00-04:00`.
 
-## 6.18 Node 17: `Send - Gmail Follow-Up`
+### 6.18 Node 17: `Send - Gmail Follow-Up`
 
 Add a `Gmail` node after the wait.
 
@@ -642,7 +642,7 @@ Best,
 Pivot Strategy Group` }}
 ```
 
-## 6.19 Node 18: `Update - Session Note Follow-Up Sent`
+### 6.19 Node 18: `Update - Session Note Follow-Up Sent`
 
 Add an `Airtable` update node after Gmail.
 

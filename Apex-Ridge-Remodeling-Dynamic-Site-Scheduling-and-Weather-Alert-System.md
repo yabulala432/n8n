@@ -235,592 +235,1143 @@ These are optional. The required build can still function without them.
 
 ## 6. Step-by-Step n8n Build Plan
 
-This section is written as a practical execution sequence so the implementer can build the workflow manually in n8n.
-
-## Recommended Build Strategy
-
-For production reliability, use a scheduled polling workflow instead of relying only on a direct Google Sheets trigger. Polling is easier to audit, more predictable for row edits, and better for controlled re-runs when something fails mid-sync.
-
-If near real-time response is essential, you can still evaluate the Google Sheets Trigger. The guide below explains both options.
+This section is written as a true build guide so someone can open n8n and assemble the workflow node by node without guessing the order.
 
 ## Workflow Names
 
 - Main workflow: `Apex Ridge - Project Task Sync`
 - Error workflow: `Apex Ridge - Scheduling Error Handler`
 
-## Phase 1 - Trigger Layer
+## Recommended Concrete Stack for This Guide
 
-### Option A: Google Sheets Trigger
+To keep the build specific, this guide assumes:
 
-Use this when:
+- `Schedule Trigger` for the main trigger
+- `Google Sheets` for the source table and write-back
+- `Google Calendar` for scheduling
+- `HTTP Request` for the weather API
+- `Slack` or `Gmail` for admin alerts
 
-- the spreadsheet volume is low
-- the n8n environment supports the trigger reliably
-- you want faster event processing after edits
+If you want near real-time response later, you can replace the first node with `Google Sheets Trigger`, but build the scheduled version first because it is easier to test and debug.
 
-Pros:
+## Before You Open the Canvas
 
-- Near real-time behavior
-- Less manual filtering logic
-- Faster feedback during testing
+Create these credentials in n8n first:
 
-Cons:
+- `Google Sheets OAuth2`
+- `Google Calendar OAuth2`
+- Weather API key or credential
+- `Slack` credential or `Gmail` credential
 
-- Can be harder to audit for missed edits
-- Trigger behavior may vary depending on how rows are edited or inserted
-- Less control over bulk recovery if a prior execution fails
+Confirm these business values before building:
 
-### Option B: Scheduled Polling Workflow
+- Spreadsheet: `Apex Ridge - Project Schedule`
+- Tab: `Project Tasks`
+- Target calendar name
+- Company timezone
+- Polling frequency, recommended `15 minutes`
 
-Use this when:
+---
 
-- reliability matters more than near real-time execution
-- the office can tolerate a short sync delay such as 5, 10, or 15 minutes
-- you want a clearer operational pattern for tracked production work
+## Main Workflow Canvas Order
 
-Pros:
+Build the main workflow in this exact order:
 
-- Easier to reason about in production
-- Better for retrying and controlled reprocessing
-- Stronger fit for row-update workflows
+`Schedule Trigger - Task Sync`  
+`-> Read Project Tasks`  
+`-> Filter Rows Needing Sync`  
+`-> Loop Through Candidate Rows`  
+`-> Normalize Task Data`  
+`-> Evaluate Validation Rules`  
+`-> Is Task Valid?`
 
-Cons:
+Invalid branch:
 
-- Not instant
-- Requires filtering logic to determine which rows need action
+`-> Flag Validation Error`  
+`-> Notify Admin Validation Failure`
 
-### Recommended Production Choice
+Valid branch:
 
-Use a `Schedule Trigger` every 15 minutes, then query the sheet for rows where:
+`-> Check Exterior Task`
 
-- `Status` is not `Synced`, or
-- `Last Synced At` is blank, or
-- the row was edited since the prior sync checkpoint
+Interior branch:
 
-If the spreadsheet does not track last-edited timestamps, use a practical operational rule:
+`-> Set Interior Defaults`
 
-- Sync all rows with `Status` in `Pending`, `Ready`, `Needs Update`, or `Weather Risk`
+Exterior branch:
+
+`-> Prepare Weather Request`  
+`-> Resolve Site Coordinates`  
+`-> Fetch Weather Forecast`  
+`-> Detect Weather Risk`
+
+Then continue to:
+
+`-> Build Calendar Payload`  
+`-> Check Existing Calendar Event`
+
+Create path:
+
+`-> Create Calendar Event`  
+`-> Write Back Sync Results`
+
+Update path:
+
+`-> Update Existing Event`  
+`-> Write Back Sync Results`
+
+If your n8n version prefers an explicit join before `Build Calendar Payload`, insert a `Merge` node named `Merge Prepared Task` before the shared calendar steps.
+
+---
+
+## 6.1 Create the Main Workflow
+
+1. Log in to n8n.
+2. Click `Create Workflow`.
+3. Rename it to `Apex Ridge - Project Task Sync`.
+4. Click `Save`.
+
+---
+
+## 6.2 Build Each Node
 
 ### Node 1: Schedule Trigger
 
-Node name: `Schedule Trigger - Task Sync`
+### Node Name
 
-Purpose:
+`Schedule Trigger - Task Sync`
 
-- Starts the sync on a fixed interval
+### Purpose
 
-Recommended settings:
+Starts the sync automatically every 15 minutes.
+
+### How to Add It
+
+1. Click `Add first step`.
+2. Search for `Schedule Trigger`.
+3. Add the node.
+4. Rename it to `Schedule Trigger - Task Sync`.
+
+### Exact Settings
 
 | Setting | Value |
 |---|---|
-| Trigger type | `Every X` |
-| Interval | `15 minutes` |
+| `Trigger Interval` | `Every X` |
+| `Value` | `15` |
+| `Unit` | `Minutes` |
 
-### Node 2: Google Sheets - Read Task Rows
+### Connect To
 
-Node name: `Read Project Tasks`
-
-Purpose:
-
-- Pull candidate rows from the `Project Tasks` sheet
-
-Implementation notes:
-
-1. Connect the Google Sheets credential.
-2. Select the spreadsheet and tab.
-3. Read the rows into n8n.
-4. Keep row number metadata if available, because you will need it later for sheet updates.
-
-### Node 3: Filter Sync Candidates
-
-Node name: `Filter Rows Needing Sync`
-
-Purpose:
-
-- Limit downstream processing to rows that should create or update calendar events
-
-Recommended filter rules:
-
-- Include rows where `Status` is `Pending`
-- Include rows where `Status` is `Needs Update`
-- Include rows where `Calendar Event ID` is populated but the row has been changed
-- Exclude rows marked `Completed`, `Cancelled`, or blank
-
-If row-level change tracking is not available, use a conservative rule and reprocess only active rows that are not already finalized.
+`Read Project Tasks`
 
 ---
 
-## Phase 2 - Data Validation
+### Node 2: Google Sheets - Read Rows
 
-The validation phase should run before any weather call or calendar action.
+### Node Name
 
-### Required Fields to Validate
+`Read Project Tasks`
 
-- `Project Name`
-- `Task Type`
-- `Start Date`
-- `Site Zip Code` for exterior work
+### Purpose
 
-### Node 4: Normalize Row Fields
+Reads rows from the `Project Tasks` tab.
 
-Node name: `Normalize Task Data`
+### How to Add It
 
-Purpose:
+1. Click the `+` after `Schedule Trigger - Task Sync`.
+2. Search for `Google Sheets`.
+3. Choose the read operation that returns many rows.
+4. Rename it to `Read Project Tasks`.
 
-- Standardize incoming field names and formats before decision logic begins
+### Exact Settings
 
-What to normalize:
-
-- Trim whitespace from text values
-- Standardize task type to `Interior` or `Exterior`
-- Convert the date into one consistent format
-- Convert `Duration Days` to a numeric value
-- Default blank duration to `1` if the business approves that rule
-
-### Node 5: Validate Required Fields
-
-Node name: `Validate Required Fields`
-
-Purpose:
-
-- Stop bad records before they create downstream failures
-
-Recommended validation logic:
-
-- `Project Name` must not be empty
-- `Task Type` must equal `Interior` or `Exterior`
-- `Start Date` must be a valid date
-- `Site Zip Code` must be present when `Task Type = Exterior`
-
-### Validation Routing
-
-`Valid row`  
-`-> continue to task classification`
-
-`Invalid row`  
-`-> update sheet status`  
-`-> send admin alert`
-
-### Node 6: Flag Invalid Row
-
-Node name: `Flag Validation Error`
-
-Purpose:
-
-- Update the row status to something operationally obvious such as `Validation Error`
-
-Recommended write-back:
-
-- `Status = Validation Error`
-- Optional `Last Synced At = current timestamp`
-- Optional `Last Error = Missing required field`
-
-### Node 7: Notify Admin - Invalid Input
-
-Node name: `Notify Admin Validation Failure`
-
-Purpose:
-
-- Inform the admin that a row could not be scheduled
-
-Alert content should include:
-
-- project ID
-- project name
-- task name
-- missing or invalid field
-- row number if available
-
----
-
-## Phase 3 - Task Classification
-
-This is the first major decision point in the workflow.
-
-### Business Rule
-
-- If `Task Type = Interior`, skip weather lookup.
-- If `Task Type = Exterior`, continue to weather evaluation.
-
-### Node 8: Check Exterior Task
-
-Node name: `Check Exterior Task`
-
-Purpose:
-
-- Branch the workflow based on whether weather matters for the task
-
-Recommended IF logic:
-
-| Condition | Route |
+| Setting | Value |
 |---|---|
-| `Task Type = Exterior` | Weather branch |
-| `Task Type = Interior` | Calendar branch without weather |
+| `Credential` | Your Google Sheets credential |
+| `Spreadsheet` | `Apex Ridge - Project Schedule` |
+| `Sheet` | `Project Tasks` |
+| `Operation` | Read rows / Get many rows |
+| `Use Header Row` | `On` |
 
-### Interior Branch Outcome
+### Important Note
 
-Interior tasks should still:
+If the Google Sheets node exposes row number metadata, keep it. If it does not, add a helper column such as `Row ID` to the sheet and use that later for write-back.
 
-- create or update a calendar event
-- write back the event ID
-- mark the row as synced
+### Connect To
 
-Weather fields for interior tasks can use safe defaults such as:
-
-- `weather_alert = false`
-- `forecast_summary = Not applicable - interior task`
+`Filter Rows Needing Sync`
 
 ---
 
-## Phase 4 - Weather API Integration
+### Node 3: Code
 
-Use this branch only for exterior work.
+### Node Name
 
-## Recommended API Approach
+`Filter Rows Needing Sync`
 
-For a real implementation, use one of these patterns:
+### Purpose
 
-1. ZIP code -> geocoding endpoint -> latitude/longitude -> forecast endpoint
-2. ZIP code -> direct forecast endpoint if supported by the chosen provider
+Keeps only rows that still need to be created or updated in Google Calendar.
 
-The most robust approach is geocoding first, because it works consistently across providers and avoids ambiguity.
+### How to Add It
 
-## Node 9: Prepare Weather Lookup Input
+1. Click the `+` after `Read Project Tasks`.
+2. Search for `Code`.
+3. Add the node.
+4. Rename it to `Filter Rows Needing Sync`.
 
-Node name: `Prepare Weather Request`
+### Exact Settings
 
-Purpose:
-
-- Convert the row's ZIP code and date fields into a clean API request context
-
-Recommended derived fields:
-
-- normalized ZIP code
-- task start date in business timezone
-- forecast target date
-
-### Node 10: HTTP Request - Geocode ZIP
-
-Node name: `Resolve Site Coordinates`
-
-Purpose:
-
-- Convert ZIP code into coordinates if required by the weather service
-
-Request intent:
-
-- send the site ZIP code to the weather provider's geocoding endpoint
-- return latitude, longitude, city, and region if available
-
-If your provider supports direct ZIP-based forecast calls, this step can be skipped.
-
-### Node 11: HTTP Request - Fetch Forecast
-
-Node name: `Fetch Weather Forecast`
-
-Purpose:
-
-- retrieve the 5-day forecast for the job site
-
-Expected output:
-
-- forecast entries for the next several days
-- temperature data
-- condition text or code
-- precipitation indicators
-
-### Parsing Strategy
-
-Most 5-day APIs return multiple forecast entries per day rather than a single daily object. Because of that, do not just use the first forecast item returned.
-
-Instead:
-
-1. Convert the task `Start Date` into the same timezone used for the forecast.
-2. Filter forecast entries to the matching calendar day.
-3. If multiple entries exist for that day, choose one of these rules:
-   - use the highest precipitation risk entry
-   - use the midday forecast entry
-   - aggregate the day and keep the worst weather condition
-
-For construction scheduling, the safest rule is usually:  
-`choose the worst forecast entry for the target workday`
-
-### Important Edge Case
-
-If the `Start Date` is outside the forecast horizon:
-
-- do not fail the workflow
-- set a non-blocking status such as `Forecast Unavailable`
-- create or update the event without a weather alert
-- optionally notify the admin only if the business wants review of unsafely future exterior tasks
-
----
-
-## Phase 5 - Risk Detection Logic
-
-This phase converts weather data into a simple scheduling decision.
-
-### Recommended Risk Criteria
-
-| Condition | Suggested rule |
+| Setting | Value |
 |---|---|
-| Heavy rain | Forecast indicates heavy rain or rainfall above team threshold |
-| Snow | Any snow forecast on the workday |
-| Storm | Thunderstorm or severe storm condition code/text |
-| High precipitation probability | Probability exceeds approved threshold such as `50%` or `60%` |
+| `Mode` | `Run Once for All Items` |
 
-### Node 12: Detect Weather Risk
+Paste this code:
 
-Node name: `Detect Weather Risk`
+```javascript
+const allowedStatuses = [
+  'Pending',
+  'Ready',
+  'Needs Update',
+  'Weather Risk',
+  'Forecast Unavailable',
+];
 
-Purpose:
+return items.filter((item) => {
+  const status = (item.json.Status ?? '').toString().trim();
+  const eventId = (item.json['Calendar Event ID'] ?? '').toString().trim();
 
-- evaluate forecast output and create a binary flag for downstream event formatting
+  if (allowedStatuses.includes(status)) return true;
+  if (!status && !eventId) return true;
 
-Recommended outputs:
-
-| Field | Meaning |
-|---|---|
-| `weather_alert` | `true` or `false` |
-| `risk_reason` | Human-readable explanation such as `Heavy rain expected` |
-| `forecast_summary` | Short summary of the selected forecast |
-| `temperature_summary` | Example: `High 58F / Low 49F` |
-| `rain_chance` | Forecast precipitation probability or equivalent |
-
-### Recommended Decision Pattern
-
-Set `weather_alert = true` when any one of these is true:
-
-- severe condition contains storm or thunderstorm
-- snow is present
-- precipitation probability is above threshold
-- rainfall amount exceeds field-operations threshold
-
-Otherwise set:
-
-- `weather_alert = false`
-
-### Operational Note
-
-This workflow should flag risk, not automatically reschedule work. Human schedulers should retain control over final changes unless the business explicitly adds auto-rescheduling later.
-
----
-
-## Phase 6 - Calendar Upsert Logic
-
-This phase is the core scheduling action.
-
-## Upsert Rule
-
-- If `Calendar Event ID` exists, update the existing Google Calendar event.
-- If `Calendar Event ID` is blank, create a new event.
-
-This prevents duplicates and keeps Google Calendar aligned with sheet edits.
-
-### Node 13: Decide Create vs Update
-
-Node name: `Check Existing Calendar Event`
-
-Purpose:
-
-- inspect whether the row already has an event ID
-
-Recommended routing:
-
-| Condition | Action |
-|---|---|
-| `Calendar Event ID` is blank | Create event |
-| `Calendar Event ID` is populated | Update event |
-
-### Best-Practice Duplicate Prevention
-
-Primary method:
-
-- Store the event ID returned by Google Calendar back into the sheet.
-
-Secondary safety method:
-
-- Include a unique identifier in the event description such as `Project ID` plus `Task Name`.
-
-Why the secondary method helps:
-
-- If a prior execution created an event but failed before writing back the event ID, the admin can still identify the event manually.
-
-### Node 14A: Create Calendar Event
-
-Node name: `Create Calendar Event`
-
-Purpose:
-
-- create a new Google Calendar event when no existing event ID is stored
-
-### Node 14B: Update Existing Event
-
-Node name: `Update Existing Event`
-
-Purpose:
-
-- update the matching event when the sheet already holds the Google Calendar event ID
-
-### Event Date Logic
-
-Recommended event date handling:
-
-- event start = `Start Date` at the company default start time, or all-day event if preferred
-- event end = `Start Date + Duration Days`
-
-If the business schedules all remodeling tasks as all-day blocks, configure the calendar event accordingly. This is usually cleaner for project scheduling than assigning artificial hour-level times.
-
----
-
-## Phase 7 - Event Formatting
-
-Calendar events should be easily scannable by project managers and field leads.
-
-### Title Rules
-
-Normal title format:
-
-`Project Name - Task Name`
-
-Weather-risk title format:
-
-`⚠️ WEATHER ALERT - Project Name - Task Name`
-
-Examples:
-
-- `Mason Residence - Interior Framing`
-- `⚠️ WEATHER ALERT - Lakeview Addition - Roofing`
-
-### Description Content
-
-The event description should include:
-
-- project ID
-- task name
-- task type
-- site ZIP code
-- forecast summary
-- temperature summary
-- rain chance
-- last sync time
-
-### Recommended Description Template
-
-```text
-Project ID: AR-1002
-Project Name: Lakeview Addition
-Task Name: Roofing
-Task Type: Exterior
-Site Zip: 60031
-Forecast Summary: Heavy rain expected during scheduled workday
-Temperature: High 58F / Low 49F
-Rain Chance: 75%
-Last Sync Time: 2026-05-02 08:30:00
+  return false;
+});
 ```
 
-### Visual Formatting Recommendations
+### Connect To
 
-| Event type | Recommendation |
-|---|---|
-| Standard event | Default calendar color |
-| Weather-risk event | Distinct color such as red or orange |
-| Forecast unavailable | Neutral color with note in description |
+`Loop Through Candidate Rows`
 
 ---
 
-## Phase 8 - Write Back to Sheet
+### Node 4: Loop Over Items
 
-After each successful calendar action, write the result back to the same row.
+### Node Name
 
-### Node 15: Update Sheet After Calendar Sync
+`Loop Through Candidate Rows`
 
-Node name: `Write Back Sync Results`
+### Purpose
 
-Purpose:
+Processes one row at a time so each weather call, calendar update, and sheet write-back stays tied to the correct row.
 
-- store identifiers and sync outcomes in Google Sheets
+### How to Add It
 
-Required write-back fields:
+1. Click the `+` after `Filter Rows Needing Sync`.
+2. Search for `Loop Over Items`.
+3. Add the node.
+4. Rename it to `Loop Through Candidate Rows`.
 
-| Field | Value to store |
-|---|---|
-| `Calendar Event ID` | Event ID returned by Google Calendar |
-| `Last Synced At` | Current execution timestamp |
-| `Status` | `Synced` or `Weather Risk` depending on result |
+### Exact Settings
 
-Recommended status rules:
+Default settings are fine for the first build.
 
-| Situation | Status |
-|---|---|
-| Interior task synced successfully | `Synced` |
-| Exterior task synced with no risk | `Synced` |
-| Exterior task synced with weather alert | `Weather Risk` |
-| Forecast unavailable but event created | `Forecast Unavailable` |
-| Validation failed | `Validation Error` |
+### Connect To
 
-### Sheet Update Best Practice
-
-Use the row number or a stable row lookup key when writing back. Do not rely only on project name text matching, because similar project names can cause accidental updates.
+`Normalize Task Data`
 
 ---
 
-## Phase 9 - Error Handling
+### Node 5: Edit Fields (Set)
 
-Do not leave failures inside the main workflow without notification.
+### Node Name
 
-## Failure Types to Plan For
+`Normalize Task Data`
 
-| Failure type | Response |
+### Purpose
+
+Creates a consistent field structure for every later node.
+
+### How to Add It
+
+1. Click the `+` after `Loop Through Candidate Rows`.
+2. Search for `Edit Fields`.
+3. Add `Edit Fields (Set)`.
+4. Rename it to `Normalize Task Data`.
+
+### Exact Settings
+
+| Setting | Value |
 |---|---|
-| Weather API failure | Notify admin, optionally mark row as `Weather API Error` |
-| Missing required data | Flag row and notify admin |
-| Google Calendar failure | Notify admin and keep row unsynced for retry |
-| Google Sheets write-back failure | Notify admin because duplicate prevention may be at risk |
+| `Mode` | `JSON Output` |
+| `Keep Only Set Fields` | `On` |
 
-### Weather API Failure Handling
+Paste this into `JSON Output`:
 
-If the weather call fails for an exterior task:
+```json
+{
+  "project_id": "{{ ($json['Project ID'] ?? '').toString().trim() }}",
+  "project_name": "{{ ($json['Project Name'] ?? '').toString().trim() }}",
+  "task_name": "{{ ($json['Task Name'] ?? '').toString().trim() }}",
+  "task_type": "{{ (($json['Task Type'] ?? '').toString().trim()).toLowerCase() === 'exterior' ? 'Exterior' : (($json['Task Type'] ?? '').toString().trim()).toLowerCase() === 'interior' ? 'Interior' : ($json['Task Type'] ?? '').toString().trim() }}",
+  "start_date": "{{ ($json['Start Date'] ?? '').toString().trim() }}",
+  "site_zip": "{{ ($json['Site Zip Code'] ?? '').toString().trim() }}",
+  "duration_days": "{{ Number($json['Duration Days'] ?? 1) || 1 }}",
+  "calendar_event_id": "{{ ($json['Calendar Event ID'] ?? '').toString().trim() }}",
+  "status": "{{ ($json['Status'] ?? '').toString().trim() }}",
+  "last_synced_at": "{{ ($json['Last Synced At'] ?? '').toString().trim() }}",
+  "source_row_id": "{{ ($json['Row ID'] ?? $json.rowNumber ?? '').toString().trim() }}"
+}
+```
 
-1. Decide whether the task should stop or continue.
-2. For most contractors, the safer approach is:
-   - do not create a weather-based risk flag
-   - notify the admin
-   - optionally leave the row in `Pending Review`
+### What This Node Does
 
-If the business wants schedule continuity, a second acceptable rule is:
+- Trims text values
+- Normalizes `Task Type`
+- Defaults blank duration to `1`
+- Creates a clean JSON shape for the rest of the workflow
 
-- create the calendar event
-- set status to `Forecast Unavailable`
-- notify the admin that weather confirmation did not complete
+### Connect To
 
-### Calendar Failure Handling
+`Evaluate Validation Rules`
 
-If Google Calendar create or update fails:
+---
 
-1. Send an admin alert with project and task details.
-2. Do not mark the row as synced.
-3. Keep the status in a retry-friendly state such as `Pending` or `Calendar Error`.
+### Node 6: Code
 
-### Separate Error Workflow
+### Node Name
 
-Create a second workflow using an `Error Trigger`.
+`Evaluate Validation Rules`
 
-Workflow shape:
+### Purpose
+
+Checks whether the row has enough data to continue.
+
+### How to Add It
+
+1. Click the `+` after `Normalize Task Data`.
+2. Search for `Code`.
+3. Add the node.
+4. Rename it to `Evaluate Validation Rules`.
+
+### Exact Settings
+
+| Setting | Value |
+|---|---|
+| `Mode` | `Run Once for Each Item` |
+
+Paste this code:
+
+```javascript
+const item = $input.item;
+const data = item.json;
+
+const errors = [];
+
+if (!data.project_name) errors.push('Project Name is required');
+if (!data.task_name) errors.push('Task Name is required');
+if (!['Interior', 'Exterior'].includes(data.task_type)) {
+  errors.push('Task Type must be Interior or Exterior');
+}
+if (!data.start_date) errors.push('Start Date is required');
+if (data.task_type === 'Exterior' && !data.site_zip) {
+  errors.push('Site Zip Code is required for exterior tasks');
+}
+
+return {
+  json: {
+    ...data,
+    is_valid: errors.length === 0,
+    validation_error: errors.join('; '),
+  },
+};
+```
+
+### Connect To
+
+`Is Task Valid?`
+
+---
+
+### Node 7: IF
+
+### Node Name
+
+`Is Task Valid?`
+
+### Purpose
+
+Stops invalid rows before any weather or calendar logic runs.
+
+### How to Add It
+
+1. Click the `+` after `Evaluate Validation Rules`.
+2. Search for `IF`.
+3. Add the node.
+4. Rename it to `Is Task Valid?`.
+
+### Exact Settings
+
+| Value 1 | Operation | Value 2 |
+|---|---|---|
+| `{{$json.is_valid}}` | `is true` |  |
+
+### Branch Meaning
+
+- `true` = valid row
+- `false` = invalid row
+
+### Connect To
+
+- `false` output -> `Flag Validation Error`
+- `true` output -> `Check Exterior Task`
+
+---
+
+### Node 8: Google Sheets - Update Row
+
+### Node Name
+
+`Flag Validation Error`
+
+### Purpose
+
+Writes `Validation Error` back to the sheet so office staff can fix the row.
+
+### How to Add It
+
+1. Click the `+` from the `false` output of `Is Task Valid?`.
+2. Search for `Google Sheets`.
+3. Choose the update-row operation.
+4. Rename it to `Flag Validation Error`.
+
+### Exact Settings
+
+| Setting | Value |
+|---|---|
+| `Spreadsheet` | `Apex Ridge - Project Schedule` |
+| `Sheet` | `Project Tasks` |
+| `Operation` | Update row |
+
+### Fields to Write Back
+
+- `Status` = `Validation Error`
+- `Last Synced At` = `{{$now}}`
+- `Last Error` = `{{$json.validation_error}}`
+
+Use row number metadata or `Row ID` as the lookup field.
+
+### Connect To
+
+`Notify Admin Validation Failure`
+
+---
+
+### Node 9: Slack or Gmail
+
+### Node Name
+
+`Notify Admin Validation Failure`
+
+### Purpose
+
+Alerts the admin that a row could not be scheduled.
+
+### How to Add It
+
+1. Click the `+` after `Flag Validation Error`.
+2. Add either `Slack` or `Gmail`.
+3. Rename it to `Notify Admin Validation Failure`.
+
+### Recommended Message
+
+```text
+Validation failure in Apex Ridge scheduling workflow
+
+Project ID: {{$json.project_id}}
+Project Name: {{$json.project_name}}
+Task Name: {{$json.task_name}}
+Error: {{$json.validation_error}}
+Row Key: {{$json.source_row_id}}
+```
+
+### Branch End
+
+This invalid-row branch ends here.
+
+---
+
+### Node 10: IF
+
+### Node Name
+
+`Check Exterior Task`
+
+### Purpose
+
+Separates interior work from exterior work.
+
+### How to Add It
+
+1. Click the `+` from the `true` output of `Is Task Valid?`.
+2. Search for `IF`.
+3. Add the node.
+4. Rename it to `Check Exterior Task`.
+
+### Exact Settings
+
+| Value 1 | Operation | Value 2 |
+|---|---|---|
+| `{{$json.task_type}}` | `equals` | `Exterior` |
+
+### Branch Meaning
+
+- `true` = exterior path
+- `false` = interior path
+
+### Connect To
+
+- `false` output -> `Set Interior Defaults`
+- `true` output -> `Prepare Weather Request`
+
+---
+
+### Node 11A: Edit Fields (Set)
+
+### Node Name
+
+`Set Interior Defaults`
+
+### Purpose
+
+Creates safe weather-related defaults for interior jobs.
+
+### How to Add It
+
+1. Click the `+` from the `false` output of `Check Exterior Task`.
+2. Search for `Edit Fields`.
+3. Add `Edit Fields (Set)`.
+4. Rename it to `Set Interior Defaults`.
+
+### Exact Settings
+
+| Setting | Value |
+|---|---|
+| `Mode` | `JSON Output` |
+
+Paste this into `JSON Output`:
+
+```json
+{
+  "project_id": "{{ $json.project_id }}",
+  "project_name": "{{ $json.project_name }}",
+  "task_name": "{{ $json.task_name }}",
+  "task_type": "{{ $json.task_type }}",
+  "start_date": "{{ $json.start_date }}",
+  "site_zip": "{{ $json.site_zip }}",
+  "duration_days": "{{ $json.duration_days }}",
+  "calendar_event_id": "{{ $json.calendar_event_id }}",
+  "source_row_id": "{{ $json.source_row_id }}",
+  "weather_alert": false,
+  "risk_reason": "Not applicable - interior task",
+  "forecast_summary": "No weather check required",
+  "temperature_summary": "Not applicable",
+  "rain_chance": "0",
+  "sync_status": "Synced"
+}
+```
+
+### Connect To
+
+`Build Calendar Payload`
+
+---
+
+### Node 11B: Edit Fields (Set)
+
+### Node Name
+
+`Prepare Weather Request`
+
+### Purpose
+
+Formats the exterior row into the fields needed for the weather lookup.
+
+### How to Add It
+
+1. Click the `+` from the `true` output of `Check Exterior Task`.
+2. Search for `Edit Fields`.
+3. Add `Edit Fields (Set)`.
+4. Rename it to `Prepare Weather Request`.
+
+### Exact Settings
+
+| Setting | Value |
+|---|---|
+| `Mode` | `JSON Output` |
+
+Paste this into `JSON Output`:
+
+```json
+{
+  "project_id": "{{ $json.project_id }}",
+  "project_name": "{{ $json.project_name }}",
+  "task_name": "{{ $json.task_name }}",
+  "task_type": "{{ $json.task_type }}",
+  "start_date": "{{ $json.start_date }}",
+  "site_zip": "{{ $json.site_zip.replace(/\\s+/g, '') }}",
+  "duration_days": "{{ $json.duration_days }}",
+  "calendar_event_id": "{{ $json.calendar_event_id }}",
+  "source_row_id": "{{ $json.source_row_id }}"
+}
+```
+
+### Connect To
+
+`Resolve Site Coordinates`
+
+---
+
+### Node 12B: HTTP Request
+
+### Node Name
+
+`Resolve Site Coordinates`
+
+### Purpose
+
+Converts ZIP code to latitude and longitude when the weather service requires coordinates.
+
+### How to Add It
+
+1. Click the `+` after `Prepare Weather Request`.
+2. Search for `HTTP Request`.
+3. Add the node.
+4. Rename it to `Resolve Site Coordinates`.
+
+### Exact Settings
+
+Use your weather provider's geocoding endpoint.
+
+| Setting | Value |
+|---|---|
+| `Method` | `GET` |
+| `Send Query Parameters` | `On` |
+
+Recommended query parameters:
+
+- `zip` = `{{$json.site_zip}}`
+- provider API key parameter
+
+### Expected Output
+
+At minimum this node should return:
+
+- `lat`
+- `lon`
+
+### Important Note
+
+Make sure your original task fields still exist after this HTTP node runs. If your HTTP node replaces the input JSON completely, add a `Merge` node after the request or use your n8n version's option for including input data with the response.
+
+### Connect To
+
+`Fetch Weather Forecast`
+
+---
+
+### Node 13B: HTTP Request
+
+### Node Name
+
+`Fetch Weather Forecast`
+
+### Purpose
+
+Retrieves the 5-day forecast for the task location.
+
+### How to Add It
+
+1. Click the `+` after `Resolve Site Coordinates`.
+2. Search for `HTTP Request`.
+3. Add the node.
+4. Rename it to `Fetch Weather Forecast`.
+
+### Exact Settings
+
+Use your provider's 5-day forecast endpoint.
+
+| Setting | Value |
+|---|---|
+| `Method` | `GET` |
+| `Send Query Parameters` | `On` |
+
+Recommended query parameters:
+
+- `lat` = latitude from `Resolve Site Coordinates`
+- `lon` = longitude from `Resolve Site Coordinates`
+- `units` = `imperial`
+- provider API key parameter
+
+### Important Note
+
+Most weather APIs return several forecast rows for the same day. The next node will pick the best matching record for the scheduled work date.
+
+Also make sure your original task fields still exist after this HTTP node runs. If the response replaces the input JSON completely, add a `Merge` node before `Detect Weather Risk` or use your n8n version's option for including input data with the response.
+
+### Connect To
+
+`Detect Weather Risk`
+
+---
+
+### Node 14B: Code
+
+### Node Name
+
+`Detect Weather Risk`
+
+### Purpose
+
+Chooses the forecast record for the task date and turns it into a simple weather-risk decision.
+
+### How to Add It
+
+1. Click the `+` after `Fetch Weather Forecast`.
+2. Search for `Code`.
+3. Add the node.
+4. Rename it to `Detect Weather Risk`.
+
+### Exact Settings
+
+| Setting | Value |
+|---|---|
+| `Mode` | `Run Once for Each Item` |
+
+Paste this code and adjust the field names if your weather provider uses a different response shape:
+
+```javascript
+const input = $input.item.json;
+const list = input.list ?? input.forecast ?? [];
+const targetDate = (input.start_date ?? '').slice(0, 10);
+
+const sameDay = list.filter((entry) => {
+  const entryDate = (entry.dt_txt ?? entry.datetime ?? '').slice(0, 10);
+  return entryDate === targetDate;
+});
+
+if (!sameDay.length) {
+  return {
+    json: {
+      ...input,
+      weather_alert: false,
+      risk_reason: 'Forecast unavailable for task date',
+      forecast_summary: 'Forecast unavailable',
+      temperature_summary: 'Unavailable',
+      rain_chance: '0',
+      sync_status: 'Forecast Unavailable',
+    },
+  };
+}
+
+const scored = sameDay.map((entry) => {
+  const weatherText = (
+    entry.weather?.[0]?.description ??
+    entry.condition ??
+    ''
+  ).toLowerCase();
+
+  const rainChance = Math.round((entry.pop ?? entry.precipitation_probability ?? 0) * 100);
+  const tempMax = entry.main?.temp_max ?? entry.temp_max ?? entry.main?.temp ?? null;
+  const tempMin = entry.main?.temp_min ?? entry.temp_min ?? entry.main?.temp ?? null;
+
+  let score = rainChance;
+  if (weatherText.includes('thunder')) score += 100;
+  if (weatherText.includes('storm')) score += 100;
+  if (weatherText.includes('snow')) score += 90;
+  if (weatherText.includes('heavy rain')) score += 80;
+
+  return {
+    entry,
+    weatherText,
+    rainChance,
+    tempMax,
+    tempMin,
+    score,
+  };
+});
+
+scored.sort((a, b) => b.score - a.score);
+const chosen = scored[0];
+
+const weatherAlert =
+  chosen.weatherText.includes('thunder') ||
+  chosen.weatherText.includes('storm') ||
+  chosen.weatherText.includes('snow') ||
+  chosen.weatherText.includes('heavy rain') ||
+  chosen.rainChance >= 60;
+
+return {
+  json: {
+    ...input,
+    weather_alert: weatherAlert,
+    risk_reason: weatherAlert ? `Risk detected: ${chosen.weatherText}` : 'No significant weather risk detected',
+    forecast_summary: chosen.weatherText || 'Forecast available',
+    temperature_summary: chosen.tempMax !== null && chosen.tempMin !== null
+      ? `High ${chosen.tempMax}F / Low ${chosen.tempMin}F`
+      : 'Temperature unavailable',
+    rain_chance: String(chosen.rainChance),
+    sync_status: weatherAlert ? 'Weather Risk' : 'Synced',
+  },
+};
+```
+
+### Connect To
+
+`Build Calendar Payload`
+
+---
+
+### Node 15: Edit Fields (Set)
+
+### Node Name
+
+`Build Calendar Payload`
+
+### Purpose
+
+Creates the event title, description, start date, end date, and status fields used by both the create and update nodes.
+
+### How to Add It
+
+1. Connect the output of `Set Interior Defaults` into a new `Edit Fields (Set)` node.
+2. Connect the output of `Detect Weather Risk` into the same node.
+3. Rename the shared node to `Build Calendar Payload`.
+
+If your n8n version does not like two inbound branches into one node, add a `Merge` node first, then place `Build Calendar Payload` after the merge.
+
+### Exact Settings
+
+| Setting | Value |
+|---|---|
+| `Mode` | `JSON Output` |
+| `Keep Only Set Fields` | `On` |
+
+Paste this into `JSON Output`:
+
+```json
+{
+  "project_id": "{{ $json.project_id }}",
+  "project_name": "{{ $json.project_name }}",
+  "task_name": "{{ $json.task_name }}",
+  "task_type": "{{ $json.task_type }}",
+  "start_date": "{{ $json.start_date }}",
+  "end_date": "{{ DateTime.fromISO($json.start_date).plus({ days: Number($json.duration_days) }).toISODate() }}",
+  "site_zip": "{{ $json.site_zip }}",
+  "calendar_event_id": "{{ $json.calendar_event_id }}",
+  "source_row_id": "{{ $json.source_row_id }}",
+  "weather_alert": "{{ $json.weather_alert }}",
+  "sync_status": "{{ $json.sync_status }}",
+  "calendar_title": "{{ $json.weather_alert === true || $json.weather_alert === 'true' ? '[WEATHER ALERT] ' + $json.project_name + ' - ' + $json.task_name : $json.project_name + ' - ' + $json.task_name }}",
+  "calendar_description": "{{ 'Project ID: ' + $json.project_id + '\\nProject Name: ' + $json.project_name + '\\nTask Name: ' + $json.task_name + '\\nTask Type: ' + $json.task_type + '\\nSite Zip: ' + ($json.site_zip || 'N/A') + '\\nForecast Summary: ' + $json.forecast_summary + '\\nTemperature: ' + $json.temperature_summary + '\\nRain Chance: ' + $json.rain_chance + '%' + '\\nRisk Reason: ' + $json.risk_reason + '\\nLast Sync Time: ' + $now }}",
+  "calendar_color": "{{ $json.weather_alert === true || $json.weather_alert === 'true' ? '11' : '' }}"
+}
+```
+
+### Connect To
+
+`Check Existing Calendar Event`
+
+---
+
+### Node 16: IF
+
+### Node Name
+
+`Check Existing Calendar Event`
+
+### Purpose
+
+Chooses whether to create a new event or update an existing one.
+
+### How to Add It
+
+1. Click the `+` after `Build Calendar Payload`.
+2. Search for `IF`.
+3. Add the node.
+4. Rename it to `Check Existing Calendar Event`.
+
+### Exact Settings
+
+| Value 1 | Operation | Value 2 |
+|---|---|---|
+| `{{$json.calendar_event_id}}` | `is not empty` |  |
+
+### Branch Meaning
+
+- `true` = update existing event
+- `false` = create new event
+
+### Connect To
+
+- `false` output -> `Create Calendar Event`
+- `true` output -> `Update Existing Event`
+
+---
+
+### Node 17A: Google Calendar - Create Event
+
+### Node Name
+
+`Create Calendar Event`
+
+### Purpose
+
+Creates a new all-day event for the task.
+
+### How to Add It
+
+1. Click the `+` from the `false` output of `Check Existing Calendar Event`.
+2. Search for `Google Calendar`.
+3. Choose the create-event operation.
+4. Rename it to `Create Calendar Event`.
+
+### Exact Settings
+
+| Setting | Value |
+|---|---|
+| `Credential` | Your Google Calendar credential |
+| `Calendar` | Apex Ridge scheduling calendar |
+| `Operation` | Create event |
+| `All Day` | `On` |
+| `Start` | `{{$json.start_date}}` |
+| `End` | `{{$json.end_date}}` |
+| `Summary` | `{{$json.calendar_title}}` |
+| `Description` | `{{$json.calendar_description}}` |
+
+### Connect To
+
+`Write Back Sync Results`
+
+---
+
+### Node 17B: Google Calendar - Update Event
+
+### Node Name
+
+`Update Existing Event`
+
+### Purpose
+
+Updates the calendar event already tied to the row.
+
+### How to Add It
+
+1. Click the `+` from the `true` output of `Check Existing Calendar Event`.
+2. Search for `Google Calendar`.
+3. Choose the update-event operation.
+4. Rename it to `Update Existing Event`.
+
+### Exact Settings
+
+| Setting | Value |
+|---|---|
+| `Credential` | Your Google Calendar credential |
+| `Calendar` | Apex Ridge scheduling calendar |
+| `Operation` | Update event |
+| `Event ID` | `{{$json.calendar_event_id}}` |
+| `All Day` | `On` |
+| `Start` | `{{$json.start_date}}` |
+| `End` | `{{$json.end_date}}` |
+| `Summary` | `{{$json.calendar_title}}` |
+| `Description` | `{{$json.calendar_description}}` |
+
+### Connect To
+
+`Write Back Sync Results`
+
+---
+
+### Node 18: Google Sheets - Update Row
+
+### Node Name
+
+`Write Back Sync Results`
+
+### Purpose
+
+Writes the scheduling result back to the same source row.
+
+### How to Add It
+
+1. Add a `Google Sheets` update-row node after `Create Calendar Event`.
+2. Also connect `Update Existing Event` to the same write-back node if your n8n version supports it.
+3. Rename it to `Write Back Sync Results`.
+
+If your version prefers separate nodes, make two identical write-back nodes:
+
+- `Write Back Sync Results - Create`
+- `Write Back Sync Results - Update`
+
+### Exact Settings
+
+| Setting | Value |
+|---|---|
+| `Spreadsheet` | `Apex Ridge - Project Schedule` |
+| `Sheet` | `Project Tasks` |
+| `Operation` | Update row |
+
+### Fields to Write Back
+
+- `Calendar Event ID` = event ID returned by Google Calendar
+- `Last Synced At` = `{{$now}}`
+- `Status` = `{{$json.sync_status}}`
+- `Risk Status` = `{{$json.weather_alert === true || $json.weather_alert === 'true' ? 'Alert' : 'Clear'}}`
+- `Last Error` = blank
+
+### Important Event ID Rule
+
+- For create actions, write the new event ID returned by Google Calendar.
+- For update actions, if the node output does not return a new ID, write back the existing `{{$json.calendar_event_id}}`.
+
+### Connect To
+
+After write-back, return to the loop so the next row can be processed.
+
+---
+
+## 6.3 Optional Trigger Variant
+
+If you want to use `Google Sheets Trigger` instead of scheduled polling:
+
+1. Replace `Schedule Trigger - Task Sync` with `Google Sheets Trigger - Project Tasks`.
+2. Keep the rest of the workflow the same.
+3. Remove `Filter Rows Needing Sync` if the trigger already sends only changed rows.
+
+For production reliability, the scheduled version is still the better first implementation.
+
+---
+
+## 6.4 Create the Separate Error Workflow
+
+Do not skip this workflow. It is what tells the admin when the automation itself fails.
+
+### Error Workflow Canvas Order
 
 `Error Trigger - Project Task Sync`  
 `-> Format Failure Context`  
 `-> Notify Admin Failure`
 
-Alert details should include:
+### Step 1: Create the Workflow
 
-- workflow name
-- execution ID
-- failed node
-- error message
-- timestamp
+1. Click `Create Workflow`.
+2. Rename it to `Apex Ridge - Scheduling Error Handler`.
+3. Save it.
+
+### Step 2: Add Error Trigger
+
+Node name: `Error Trigger - Project Task Sync`
+
+Purpose:
+
+- Starts when the main workflow fails
+
+How to add it:
+
+1. Add `Error Trigger` as the first node.
+2. Rename it to `Error Trigger - Project Task Sync`.
+
+### Step 3: Add Set Node
+
+Node name: `Format Failure Context`
+
+Purpose:
+
+- Cleans the failure details before you send them to Slack or email
+
+Recommended fields:
+
+- `workflow_name` = `{{$json.workflow.name}}`
+- `execution_id` = `{{$json.execution.id}}`
+- `failed_node` = `{{$json.lastNodeExecuted}}`
+- `error_message` = `{{$json.error.message}}`
+- `failed_at` = `{{$now}}`
+
+### Step 4: Add the Alert Node
+
+Node name: `Notify Admin Failure`
+
+Purpose:
+
+- Sends the actual failure notification
+
+Recommended message:
+
+```text
+Apex Ridge scheduling workflow failed
+
+Workflow: {{$json.workflow_name}}
+Execution ID: {{$json.execution_id}}
+Failed Node: {{$json.failed_node}}
+Error Message: {{$json.error_message}}
+Time: {{$json.failed_at}}
+```
+
+### Step 5: Test It
+
+1. Run the main workflow with a few sample rows.
+2. Force one failure on purpose.
+3. Confirm the error workflow sends the alert.
+4. Activate both workflows only after that test succeeds.
 
 ---
+
+## 6.5 Status Rules to Keep Consistent
+
+Use these exact values everywhere:
+
+| Situation | Status |
+|---|---|
+| Interior task synced successfully | `Synced` |
+| Exterior task synced with no risk | `Synced` |
+| Exterior task synced with risk | `Weather Risk` |
+| Forecast missing for that date | `Forecast Unavailable` |
+| Missing or bad input | `Validation Error` |
+
+---
+
+## 6.6 Important Build Notes
+
+### Duplicate Prevention
+
+The single most important field in this design is `Calendar Event ID`.
+
+- Blank `Calendar Event ID` means create a new event
+- Existing `Calendar Event ID` means update the existing event
+
+Never skip the write-back node after a successful calendar action.
+
+### Row Identification
+
+When updating Google Sheets:
+
+- use row number metadata if available, or
+- use a helper key such as `Row ID`
+
+Do not rely on project-name text matching.
+
+### Forecast Horizon
+
+Most 5-day weather APIs cannot score dates beyond the forecast window.
+
+When that happens:
+
+- still create or update the calendar event
+- set the row to `Forecast Unavailable`
+- do not mark it as `Weather Risk` unless the API actually returned a risky forecast for that date
+
+### Human Control
+
+This workflow should flag weather risk, not automatically reschedule work. The office team should stay in control of date changes.
 
 ## 7. Recommended Node Naming Convention
 
@@ -1054,3 +1605,4 @@ For a real contractor environment, the strongest first version is:
 - Slack or Gmail alerts for failures
 
 That combination is practical, maintainable, easy to explain to operations staff, and strong enough for a production pilot without overengineering the first release.
+

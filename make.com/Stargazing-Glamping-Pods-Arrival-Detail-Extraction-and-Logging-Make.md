@@ -20,7 +20,7 @@ This gives the owner three immediate operational benefits:
 Because this is an XS project, the build should stay intentionally lean and use a minimal scenario footprint:
 
 1. Gmail trigger
-2. Data parser or tools module
+2. `Text parser > Match pattern`
 3. Google Sheets append row
 4. Gmail reply
 
@@ -65,7 +65,7 @@ Each valid email should result in:
 This should remain an XS scenario with one trigger and three downstream modules.
 
 `Gmail Watch Emails`  
-`-> Tools / Text Parser`  
+`-> Text parser Match pattern`  
 `-> Google Sheets Add a Row`  
 `-> Gmail Send a Reply`
 
@@ -73,7 +73,7 @@ This should remain an XS scenario with one trigger and three downstream modules.
 
 `New email arrives with approved label or subject`  
 `-> Gmail trigger collects subject, sender, body, and received timestamp`  
-`-> Parser extracts Guest Name, Arrival Time, Dietary Restrictions, and Pod Number`  
+`-> Text parser Match pattern extracts Guest Name, Arrival Time, Dietary Restrictions, and Pod Number`  
 `-> Google Sheets appends a new row with extracted values plus scenario timestamp`  
 `-> Gmail replies to the guest confirming receipt`
 
@@ -182,7 +182,7 @@ Do not over-engineer the parser. Keep it lightweight and predictable.
 The final scenario should contain:
 
 1. Gmail trigger
-2. parser/tools module
+2. `Text parser > Match pattern`
 3. Google Sheets add row module
 4. Gmail reply module
 
@@ -195,7 +195,7 @@ If the builder is new to Make.com, the easiest way to complete this project is t
 1. prepare the Gmail label and the Google Sheet first
 2. create the scenario shell
 3. configure the Gmail trigger and test it alone
-4. add the parser module and test extraction
+4. add `Text parser > Match pattern` and test extraction
 5. add the Google Sheets module and test row creation
 6. add the Gmail reply module and test the full flow
 7. run three sample emails through the scenario
@@ -320,7 +320,7 @@ Use this only if needed. The simplest reliable setup is still best.
 
 ---
 
-### Phase 2 - Add the Data Parser / Tools Module
+### Phase 2 - Add `Text parser > Match pattern`
 
 ## Goal
 
@@ -331,18 +331,19 @@ Turn the email body into four clean values:
 - Dietary Restrictions
 - Pod Number
 
-## Recommended Module Approach
+## Recommended Module
 
-Use one tools or text parser module that can extract labeled values from the email body.
+Use `Text parser > Match pattern`.
 
-Because this is an XS project, do not add multiple helper modules unless absolutely necessary. Keep the extraction logic in one parser step if possible.
+This is the parser to use for this build. Do not swap it for another parser or a chain of helper modules. Keep the extraction in this one step.
 
 ## Detailed Beginner Steps
 
 1. Click the `+` to the right of the Gmail trigger.
-2. Search for the parser or tools app you want to use.
-3. Choose the text-parsing style module that best supports extracting values from labeled lines.
-4. Rename the module to `Extract Arrival Details`.
+2. Search for `Text parser`.
+3. Select the `Text parser` app.
+4. Choose the module `Match pattern`.
+5. Rename the module to `Extract Arrival Details`.
 
 ## What the Parser Needs to Read
 
@@ -360,6 +361,27 @@ Dietary Restrictions: Vegetarian
 Pod Number: Pod 3
 ```
 
+## Exact Parser Configuration
+
+Configure the module like this:
+
+1. In the `Text` field, map the plain-text email body from the Gmail trigger.
+2. In the `Pattern` field, paste this exact pattern:
+
+```regex
+Guest Name:\s*(?<GuestName>[^\r\n]+)\r?\nScheduled Arrival Time:\s*(?<ArrivalTime>[^\r\n]+)\r?\nDietary Restrictions:\s*(?<DietaryInfo>[^\r\n]*)\r?\nPod Number:\s*(?<PodNumber>[^\r\n]+)
+```
+
+3. If the module shows a `Global match` option, leave it off.
+4. Save the module.
+
+This pattern is set up so:
+
+- `GuestName` captures the guest name only
+- `ArrivalTime` captures the arrival time only
+- `DietaryInfo` can be blank
+- `PodNumber` captures the pod number only
+
 ## Extraction Targets
 
 | Output Field | Source Label |
@@ -369,17 +391,16 @@ Pod Number: Pod 3
 | Dietary Info | `Dietary Restrictions:` |
 | Pod Number | `Pod Number:` |
 
-## Beginner Parsing Strategy
+## Expected Parser Outputs
 
-The parser should conceptually do this:
+After the parser runs, you should see these named outputs:
 
-1. find the line beginning with `Guest Name:`
-2. take the text after the colon
-3. repeat for the other three labels
-4. trim extra spaces from each result
+- `GuestName`
+- `ArrivalTime`
+- `DietaryInfo`
+- `PodNumber`
 
-If your chosen parser asks for patterns, make each pattern closely match the visible labels in the email.  
-If it asks for delimiters, use the labels and line breaks carefully.
+Use these exact parser outputs in the next module mappings.
 
 ## Important Rule for Dietary Restrictions
 
@@ -411,6 +432,8 @@ Check especially:
 - `Arrival Time` should contain only the time value
 - `Pod Number` should not include unrelated line breaks
 - `Dietary Info` should be blank, not erroring, when empty
+
+If the parser returns no match, the usual cause is that the email body format does not exactly match the four-line template. Fix the sample email format first, then retest.
 
 ## Do Not Move Forward Until
 
@@ -453,10 +476,10 @@ Append one clean row to the arrival log every time a valid guest email is proces
 
 | Sheet Column | What to Map |
 |---|---|
-| `Guest Name` | Guest Name from the parser module |
-| `Arrival Time` | Scheduled Arrival Time from the parser module |
-| `Dietary Info` | Dietary Restrictions from the parser module |
-| `Pod Number` | Pod Number from the parser module |
+| `Guest Name` | `GuestName` from `Extract Arrival Details` |
+| `Arrival Time` | `ArrivalTime` from `Extract Arrival Details` |
+| `Dietary Info` | `DietaryInfo` from `Extract Arrival Details` |
+| `Pod Number` | `PodNumber` from `Extract Arrival Details` |
 | `Logged At` | Current date/time generated by Make.com |
 
 ## Beginner Mapping Tips
@@ -730,7 +753,7 @@ Use clear names so the scenario screenshot is easy to review.
 | Module | Recommended Name |
 |---|---|
 | Gmail trigger | `Watch Arrival Detail Emails` |
-| Parser/tools module | `Extract Arrival Details` |
+| `Text parser > Match pattern` | `Extract Arrival Details` |
 | Google Sheets module | `Log Arrival Details to Sheet` |
 | Gmail reply module | `Send Arrival Confirmation` |
 
